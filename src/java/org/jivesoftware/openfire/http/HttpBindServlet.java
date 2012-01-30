@@ -178,7 +178,7 @@ public class HttpBindServlet extends HttpServlet {
         }
         synchronized (session) {
             try {
-                respond(session, response, session.getResponse((Long) request.getAttribute("request")),
+                respond(session, request, response, session.getResponse((Long) request.getAttribute("request")),
                         request.getMethod());
             }
             catch (HttpBindException e) {
@@ -198,7 +198,7 @@ public class HttpBindServlet extends HttpServlet {
         try {
         	if ((session.getMajorVersion() == 1 && session.getMinorVersion() >= 6) ||
                 	session.getMajorVersion() > 1) {
-                respond(session, response, createErrorBody(bindingError.getErrorType().getType(),
+                respond(session, request, response, createErrorBody(bindingError.getErrorType().getType(),
                         bindingError.getCondition()), request.getMethod());
             }
             else {
@@ -261,11 +261,11 @@ public class HttpBindServlet extends HttpServlet {
 
             if ("terminate".equals(type)) {
                 session.close();
-                respond(session, response, createEmptyBody(), request.getMethod());
+                respond(session, request, response, createEmptyBody(), request.getMethod());
             }
             else if ("true".equals(restartStream) && rootNode.elements().size() == 0) {
                 try {
-					respond(session, response, createSessionRestartResponse(session), request.getMethod());
+					respond(session, request, response, createSessionRestartResponse(session), request.getMethod());
 				}
 				catch (DocumentException e) {
 					Log.error("Error sending session restart response to client.", e);
@@ -273,7 +273,7 @@ public class HttpBindServlet extends HttpServlet {
             }
             else if (pauseDuration > 0 && pauseDuration <= session.getMaxPause()) {
             	session.pause(pauseDuration);
-                respond(session, response, createEmptyBody(), request.getMethod());
+                respond(session, request, response, createEmptyBody(), request.getMethod());
                 session.setLastResponseEmpty(true);
             }
             else {
@@ -282,7 +282,7 @@ public class HttpBindServlet extends HttpServlet {
                 request.setAttribute("request-session", connection.getSession());
                 request.setAttribute("request", connection.getRequestId());
                 try {
-                    respond(session, response, session.getResponse(connection.getRequestId()),
+                    respond(session, request, response, session.getResponse(connection.getRequestId()),
                             request.getMethod());
                 }
                 catch (HttpBindException e) {
@@ -324,7 +324,7 @@ public class HttpBindServlet extends HttpServlet {
             if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
                 System.out.println(new Date()+": HTTP RECV(" + connection.getSession().getStreamID().getID() + "): " + rootNode.asXML());
             }
-            respond(response, connection, request.getMethod());
+            respond(request, response, connection, request.getMethod());
         }
         catch (UnauthorizedException e) {
             // Server wasn't initialized yet.
@@ -337,7 +337,8 @@ public class HttpBindServlet extends HttpServlet {
 
     }
 
-    private void respond(HttpServletResponse response, HttpConnection connection, String method)
+    // add request argument
+    private void respond(HttpServletRequest request, HttpServletResponse response, HttpConnection connection, String method)
             throws IOException
     {
         String content;
@@ -349,10 +350,11 @@ public class HttpBindServlet extends HttpServlet {
             connection.getSession().setLastResponseEmpty(true);
         }
 
-        respond(connection.getSession(), response, content, method);
+        respond(connection.getSession(), request, response, content, method);
     }
 
-    private void respond(HttpSession session, HttpServletResponse response, String content, String method)
+    // add request argument
+    private void respond(HttpSession session, HttpServletRequest request, HttpServletResponse response, String content, String method)
             throws IOException {
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType("GET".equals(method) ? "text/javascript" : "text/xml");
@@ -366,6 +368,24 @@ public class HttpBindServlet extends HttpServlet {
                 response.addHeader("Pragma", "no-cache");
             }
             content = "_BOSH_(\"" + StringEscapeUtils.escapeJavaScript(content) + "\")";
+        }
+        
+        // add CORS headers
+        if (boshManager.isCORSEnabled()) {
+            if (boshManager.isAllOriginsAllowed())
+                // set the Access-Control-Allow-Origin header to * to allow all Origin to do the CORS  
+                response.addHeader("Access-Control-Allow-Origin", HttpBindManager.HTTP_BIND_CORS_ALLOW_ORIGIN_DEFAULT);
+            else {
+                // get the Origin header from the request and check if it is in the allowed Origin Map.
+                // if it is allowed write it back to the Access-Control-Allow-Origin header of the respond. 
+                String origin = request.getHeader("Origin");
+                if (boshManager.isThisOriginAllowed(origin)) {
+                    response.addHeader("Access-Control-Allow-Origin", origin);
+                }
+            }
+            response.addHeader("Access-Control-Allow-Methods", HttpBindManager.HTTP_BIND_CORS_ALLOW_METHODS_DEFAULT);
+            response.addHeader("Access-Control-Allow-Headers", HttpBindManager.HTTP_BIND_CORS_ALLOW_HEADERS_DEFAULT);
+            response.addHeader("Access-Control-Max-Age", HttpBindManager.HTTP_BIND_CORS_MAX_AGE_DEFAULT);
         }
 
         if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
